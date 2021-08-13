@@ -5,180 +5,359 @@ import logging
 import numpy as np
 import gurobipy as gp
 from gurobipy import GRB
+import multiprocessing
 
 class SimpleHeu():
     def __init__(self):
         pass
 
     def DEP_solver(self, dict_data, scenario_input, TGS, lambd=0, pen_rho=0, iteration=0):
-        problem_name = "DEP"
-        model = gp.Model(problem_name)
-        n_stations = dict_data['n_stations']
-        stations = range(n_stations)
+        with gp.Env(empty=True) as env:
+            env.setParam('OutputFlag', 0)
+            env.start()
+            problem_name = "DEP"
+            model = gp.Model(problem_name,env=env)
+            n_stations = dict_data['n_stations']
+            stations = range(n_stations)
+                    
+            ### Variables
+            X = model.addVars(
+                n_stations,
+                lb=0,
+                vtype=GRB.INTEGER,
+                name='X'
+            )
+            
+            I_plus = model.addVars(
+                n_stations,
+                lb=0,
+                vtype=GRB.INTEGER,
+                name='I+'
+            )
+
+            I_minus = model.addVars(
+                n_stations, n_stations,
+                lb=0,
+                vtype=GRB.INTEGER,
+                name='I-'
+            )
+
+            O_plus = model.addVars(
+                n_stations,
+                lb=0,
+                vtype=GRB.INTEGER,
+                name='O+'
+            )
+
+            O_minus = model.addVars(
+                n_stations,
+                lb=0,
+                vtype=GRB.INTEGER,
+                name='O-'
+            )
+
+            T_plus = model.addVars(
+                n_stations,
+                lb=0,
+                vtype=GRB.INTEGER,
+                name='T+'
+            )
+
+            T_minus = model.addVars(
+                n_stations,
+                lb=0,
+                vtype=GRB.INTEGER,
+                name='T-'
+            )
+
+
+            tau = model.addVars(
+                n_stations, n_stations,
+                lb=0,
+                vtype=GRB.INTEGER,
+                name='tau'
+            )
+
+            beta = model.addVars(
+                n_stations, n_stations,
+                lb=0,
+                vtype=GRB.INTEGER,
+                name='beta'
+            )
+
+            rho = model.addVars(
+                n_stations, n_stations,
+                lb=0,
+                vtype=GRB.INTEGER,
+                name='rho'
+            )
+            model.update()
+            sol = [X[i] for i in stations]
+
+            
+            
+            ## Objective Function
+            obj_funct = dict_data["procurement_cost"] * gp.quicksum(X[i] for i in stations)
+            
+            obj_funct += gp.quicksum(
+                (
+                    dict_data['stock_out_cost'][i]*gp.quicksum(I_minus[i, j] for j in stations) +
+                    dict_data["time_waste_cost"][i]*O_minus[i] +
+                    gp.quicksum(dict_data['trans_ship_cost'][i][j]*tau[i, j]  for j in stations)
+                ) for i in stations
+            )
+            if iteration!= 0:
+                relax = np.dot(lambd.T,(np.array(sol)-TGS))
+                penalty = (pen_rho/2)*(np.dot((np.array(sol)-TGS),(np.array(sol)-TGS).T))
+                #penalty = (pen_rho/2) *abs(np.array(sol)-TGS)
+                obj_funct += relax
+            
+                obj_funct += penalty
+
+
+            model.setObjective(obj_funct, GRB.MINIMIZE)
+
+
+            ### Costraints
                 
-        ### Variables
-        X = model.addVars(
-            n_stations,
-            lb=0,
-            vtype=GRB.INTEGER,
-            name='X'
-        )
-        
-        I_plus = model.addVars(
-            n_stations,
-            lb=0,
-            vtype=GRB.INTEGER,
-            name='I+'
-        )
-
-        I_minus = model.addVars(
-            n_stations, n_stations,
-            lb=0,
-            vtype=GRB.INTEGER,
-            name='I-'
-        )
-
-        O_plus = model.addVars(
-            n_stations,
-            lb=0,
-            vtype=GRB.INTEGER,
-            name='O+'
-        )
-
-        O_minus = model.addVars(
-            n_stations,
-            lb=0,
-            vtype=GRB.INTEGER,
-            name='O-'
-        )
-
-        T_plus = model.addVars(
-            n_stations,
-            lb=0,
-            vtype=GRB.INTEGER,
-            name='T+'
-        )
-
-        T_minus = model.addVars(
-            n_stations,
-            lb=0,
-            vtype=GRB.INTEGER,
-            name='T-'
-        )
-
-
-        tau = model.addVars(
-            n_stations, n_stations,
-            lb=0,
-            vtype=GRB.INTEGER,
-            name='tau'
-        )
-
-        beta = model.addVars(
-            n_stations, n_stations,
-            lb=0,
-            vtype=GRB.INTEGER,
-            name='beta'
-        )
-
-        rho = model.addVars(
-            n_stations, n_stations,
-            lb=0,
-            vtype=GRB.INTEGER,
-            name='rho'
-        )
-        model.update()
-        sol = [X[i] for i in stations]
-
-        
-        
-        ## Objective Function
-        obj_funct = dict_data["procurement_cost"] * gp.quicksum(X[i] for i in stations)
-        
-        obj_funct += gp.quicksum(
-            (
-                dict_data['stock_out_cost'][i]*gp.quicksum(I_minus[i, j] for j in stations) +
-                dict_data["time_waste_cost"][i]*O_minus[i] +
-                gp.quicksum(dict_data['trans_ship_cost'][i][j]*tau[i, j]  for j in stations)
-            ) for i in stations
-        )
-        if iteration!= 0:
-            relax = np.dot(lambd.T,(np.array(sol)-TGS))
-            penalty = (pen_rho/2)*(np.dot((np.array(sol)-TGS),(np.array(sol)-TGS).T))
-            #penalty = (pen_rho/2) *abs(np.array(sol)-TGS)
-            obj_funct += relax
-        
-            obj_funct += penalty
-
-
-        model.setObjective(obj_funct, GRB.MINIMIZE)
-
-
-        ### Costraints
-            
-        for i in stations:
-            for j in stations:
-                model.addConstr(
-                    beta[i, j] == scenario_input[i, j] - I_minus[i, j],
-                    f"rented_bikes_number"
-                )
-            
-        for i in stations:
-            model.addConstr(
-                I_plus[i] - gp.quicksum(I_minus[i,j] for j in stations) == X[i] - gp.quicksum(scenario_input[i, j]for j in stations),
-                f"surplus_shortage_balance"
-            )
-
-        for i in stations:
-            model.addConstr(
-                O_plus[i] - O_minus[i] == dict_data['station_cap'][i] - X[i] + gp.quicksum(beta[i,j] for j in stations) - gp.quicksum(beta[j, i] for j in stations),
-                f"residual_overflow_balance"
-            )
-
-        for i in stations:
-            model.addConstr(
-                gp.quicksum(rho[i,j] for j in stations) == O_minus[i],
-                f"redir_bikes_eq_overflow"
-            )
-
-        for i in stations:
-            model.addConstr(
-                gp.quicksum(rho[j,i] for j in stations) <= O_plus[i],
-                f"redir_bikes_not_resid_cap"
-            )
-
-        for i in stations:
-            model.addConstr(
-                T_plus[i] - T_minus[i] == dict_data['station_cap'][i] - O_plus[i] + gp.quicksum(rho[j,i] for j in stations) - X[i],
-                f"exceed_failure_balance"
-            )
-
-        for i in stations:
-            model.addConstr(
-                gp.quicksum(tau[i,j] for j in stations) == T_plus[i],
-                f"tranship_equal_excess"
-            )
-
-        for i in stations:
-            model.addConstr(
-                gp.quicksum(tau[j,i] for j in stations) <= T_minus[i],
-                f"tranship_equal_failure"
-            )
-
-
-        model.update()
-        model.setParam('OutputFlag', 0)
-        model.optimize()
-        sol = [0] * dict_data['n_stations']
-        of = -1
-        if model.status == GRB.Status.OPTIMAL:
             for i in stations:
-                grb_var = model.getVarByName(
-                    f"X[{i}]"
+                for j in stations:
+                    model.addConstr(
+                        beta[i, j] == scenario_input[i, j] - I_minus[i, j],
+                        f"rented_bikes_number"
+                    )
+                
+            for i in stations:
+                model.addConstr(
+                    I_plus[i] - gp.quicksum(I_minus[i,j] for j in stations) == X[i] - gp.quicksum(scenario_input[i, j]for j in stations),
+                    f"surplus_shortage_balance"
                 )
-                sol[i] = grb_var.X
-            of = model.getObjective().getValue()
-        return of, np.array(sol)
+
+            for i in stations:
+                model.addConstr(
+                    O_plus[i] - O_minus[i] == dict_data['station_cap'][i] - X[i] + gp.quicksum(beta[i,j] for j in stations) - gp.quicksum(beta[j, i] for j in stations),
+                    f"residual_overflow_balance"
+                )
+
+            for i in stations:
+                model.addConstr(
+                    gp.quicksum(rho[i,j] for j in stations) == O_minus[i],
+                    f"redir_bikes_eq_overflow"
+                )
+
+            for i in stations:
+                model.addConstr(
+                    gp.quicksum(rho[j,i] for j in stations) <= O_plus[i],
+                    f"redir_bikes_not_resid_cap"
+                )
+
+            for i in stations:
+                model.addConstr(
+                    T_plus[i] - T_minus[i] == dict_data['station_cap'][i] - O_plus[i] + gp.quicksum(rho[j,i] for j in stations) - X[i],
+                    f"exceed_failure_balance"
+                )
+
+            for i in stations:
+                model.addConstr(
+                    gp.quicksum(tau[i,j] for j in stations) == T_plus[i],
+                    f"tranship_equal_excess"
+                )
+
+            for i in stations:
+                model.addConstr(
+                    gp.quicksum(tau[j,i] for j in stations) <= T_minus[i],
+                    f"tranship_equal_failure"
+                )
+
+
+            model.update()
+            model.setParam('OutputFlag', 0)
+            model.optimize()
+            sol = [0] * dict_data['n_stations']
+            of = -1
+            if model.status == GRB.Status.OPTIMAL:
+                for i in stations:
+                    grb_var = model.getVarByName(
+                        f"X[{i}]"
+                    )
+                    sol[i] = grb_var.X
+                of = model.getObjective().getValue()
+            return of, np.array(sol)
+
+
+    def DEP_solver_multi(self, return_dict, procnum, dict_data, scenario_input, TGS, lambd=0, pen_rho=0, iteration=0):
+        with gp.Env(empty=True) as env:
+            env.setParam('OutputFlag', 0)
+            env.start()
+            problem_name = "DEP"
+            model = gp.Model(problem_name,env=env)
+            n_stations = dict_data['n_stations']
+            stations = range(n_stations)
+                    
+            ### Variables
+            X = model.addVars(
+                n_stations,
+                lb=0,
+                vtype=GRB.INTEGER,
+                name='X'
+            )
+            
+            I_plus = model.addVars(
+                n_stations,
+                lb=0,
+                vtype=GRB.INTEGER,
+                name='I+'
+            )
+
+            I_minus = model.addVars(
+                n_stations, n_stations,
+                lb=0,
+                vtype=GRB.INTEGER,
+                name='I-'
+            )
+
+            O_plus = model.addVars(
+                n_stations,
+                lb=0,
+                vtype=GRB.INTEGER,
+                name='O+'
+            )
+
+            O_minus = model.addVars(
+                n_stations,
+                lb=0,
+                vtype=GRB.INTEGER,
+                name='O-'
+            )
+
+            T_plus = model.addVars(
+                n_stations,
+                lb=0,
+                vtype=GRB.INTEGER,
+                name='T+'
+            )
+
+            T_minus = model.addVars(
+                n_stations,
+                lb=0,
+                vtype=GRB.INTEGER,
+                name='T-'
+            )
+
+
+            tau = model.addVars(
+                n_stations, n_stations,
+                lb=0,
+                vtype=GRB.INTEGER,
+                name='tau'
+            )
+
+            beta = model.addVars(
+                n_stations, n_stations,
+                lb=0,
+                vtype=GRB.INTEGER,
+                name='beta'
+            )
+
+            rho = model.addVars(
+                n_stations, n_stations,
+                lb=0,
+                vtype=GRB.INTEGER,
+                name='rho'
+            )
+            model.update()
+            sol = [X[i] for i in stations]
+
+            
+            
+            ## Objective Function
+            obj_funct = dict_data["procurement_cost"] * gp.quicksum(X[i] for i in stations)
+            
+            obj_funct += gp.quicksum(
+                (
+                    dict_data['stock_out_cost'][i]*gp.quicksum(I_minus[i, j] for j in stations) +
+                    dict_data["time_waste_cost"][i]*O_minus[i] +
+                    gp.quicksum(dict_data['trans_ship_cost'][i][j]*tau[i, j]  for j in stations)
+                ) for i in stations
+            )
+            if iteration!= 0:
+                relax = np.dot(lambd.T,(np.array(sol)-TGS))
+                penalty = (pen_rho/2)*(np.dot((np.array(sol)-TGS),(np.array(sol)-TGS).T))
+                #penalty = (pen_rho/2) *abs(np.array(sol)-TGS)
+                obj_funct += relax
+            
+                obj_funct += penalty
+
+
+            model.setObjective(obj_funct, GRB.MINIMIZE)
+
+
+            ### Costraints
+                
+            for i in stations:
+                for j in stations:
+                    model.addConstr(
+                        beta[i, j] == scenario_input[i, j] - I_minus[i, j],
+                        f"rented_bikes_number"
+                    )
+                
+            for i in stations:
+                model.addConstr(
+                    I_plus[i] - gp.quicksum(I_minus[i,j] for j in stations) == X[i] - gp.quicksum(scenario_input[i, j]for j in stations),
+                    f"surplus_shortage_balance"
+                )
+
+            for i in stations:
+                model.addConstr(
+                    O_plus[i] - O_minus[i] == dict_data['station_cap'][i] - X[i] + gp.quicksum(beta[i,j] for j in stations) - gp.quicksum(beta[j, i] for j in stations),
+                    f"residual_overflow_balance"
+                )
+
+            for i in stations:
+                model.addConstr(
+                    gp.quicksum(rho[i,j] for j in stations) == O_minus[i],
+                    f"redir_bikes_eq_overflow"
+                )
+
+            for i in stations:
+                model.addConstr(
+                    gp.quicksum(rho[j,i] for j in stations) <= O_plus[i],
+                    f"redir_bikes_not_resid_cap"
+                )
+
+            for i in stations:
+                model.addConstr(
+                    T_plus[i] - T_minus[i] == dict_data['station_cap'][i] - O_plus[i] + gp.quicksum(rho[j,i] for j in stations) - X[i],
+                    f"exceed_failure_balance"
+                )
+
+            for i in stations:
+                model.addConstr(
+                    gp.quicksum(tau[i,j] for j in stations) == T_plus[i],
+                    f"tranship_equal_excess"
+                )
+
+            for i in stations:
+                model.addConstr(
+                    gp.quicksum(tau[j,i] for j in stations) <= T_minus[i],
+                    f"tranship_equal_failure"
+                )
+
+
+            model.update()
+            model.setParam('OutputFlag', 0)
+            model.optimize()
+            sol = [0] * dict_data['n_stations']
+            of = -1
+            if model.status == GRB.Status.OPTIMAL:
+                for i in stations:
+                    grb_var = model.getVarByName(
+                        f"X[{i}]"
+                    )
+                    sol[i] = grb_var.X
+                of = model.getObjective().getValue()
+            return_dict[procnum] = (of, np.array(sol))
+            return of, np.array(sol)
     
 
     def solve(
@@ -223,10 +402,27 @@ class SimpleHeu():
             ans = []
 
             # solve monoscenario problems
+
+            manager = multiprocessing.Manager()
+            return_dict = manager.dict()
+            jobs = []
+            
             for i, s in enumerate(np.rollaxis(scenarios, 2)):
-                of, sol = self.DEP_solver(dict_data, s, TGS, lam[i], rho, k)
+                p = multiprocessing.Process(target=self.DEP_solver_multi, args=(return_dict, i, dict_data, s, TGS, lam[i], rho, k))
+                jobs.append(p)
+                p.start()
+
+                # of, sol = self.DEP_solver(dict_data, s, TGS, lam[i], rho, k)
+                # of_array.append(of)
+                # ans.append(np.array(sol))
+
+            for proc in jobs:
+                proc.join()
+            
+            for of, sol in return_dict.values():
                 of_array.append(of)
                 ans.append(np.array(sol))
+
             x_s_arrays = np.stack(ans)
 
             # compute temporary global solution for first iteration
