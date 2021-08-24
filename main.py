@@ -194,7 +194,7 @@ if __name__ == '__main__':
     """
     test = Tester()
     n_scenarios = 100
-    n_rep = 100
+    n_rep = 5
     print("IN SAMPLE STABILITY ANALYSIS")
     
     # print("EXACT MODEL START...")

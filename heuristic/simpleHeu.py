@@ -393,7 +393,7 @@ class SimpleHeu():
 
         for k in range(1, maxiter+1):
 
-            if ( np.all(abs(x_s_arrays-TGS) <= 0.5) ):
+            if ( np.all(abs(x_s_arrays-TGS) == 0) ):
                 break
 
    
@@ -407,21 +407,49 @@ class SimpleHeu():
             return_dict = manager.dict()
             jobs = []
             
-            for i, s in enumerate(np.rollaxis(scenarios, 2)):
-                p = multiprocessing.Process(target=self.DEP_solver_multi, args=(return_dict, i, dict_data, s, TGS, lam[i], rho, k))
-                jobs.append(p)
-                p.start()
+            # first_start = time.time()
+            # for i, s in enumerate(np.rollaxis(scenarios, 2)):
+            #     # p = multiprocessing.Process(target=self.DEP_solver_multi, args=(return_dict, i, dict_data, s, TGS, lam[i], rho, k))
+            #     # jobs.append(p)
+            #     # p.start()
 
-                # of, sol = self.DEP_solver(dict_data, s, TGS, lam[i], rho, k)
-                # of_array.append(of)
-                # ans.append(np.array(sol))
+            #     of, sol = self.DEP_solver(dict_data, s, TGS, lam[i], rho, k)
+            #     of_array.append(of)
+            #     ans.append(np.array(sol))
+            # first_end = time.time()
+            # print('First loop: ', first_end-first_start)
 
-            for proc in jobs:
-                proc.join()
+            ###PROVA###
+            start_time = time.time()
+            creation_start = time.time()
+            processes = [multiprocessing.Process(target=self.DEP_solver_multi, args=(return_dict, i, dict_data, s, TGS, lam[i], rho, k)) for i, s in enumerate(np.rollaxis(scenarios, 2))]
+            creation_end = time.time()
+            print('Creation time: ', creation_end-creation_start)
+            num_cores = 20
             
+            for i in range(0,len(processes), num_cores):
+                for j in range(num_cores):
+                    processes[j+i].start()
+                for j in range(num_cores):
+                    processes[j+i].join()
+            # [process.start() for process in processes]
+            # [process.join() for process in processes]
+            end_time = time.time()
+            print("Total time=", end_time - start_time)
+            ###End-Prova###
+
+            # sec_start = time.time()
+            # for proc in jobs:
+            #     proc.join()
+            # sec_end = time.time()
+            # print('Second loop: ', sec_end-sec_start)
+            
+            third_start = time.time()
             for of, sol in return_dict.values():
                 of_array.append(of)
                 ans.append(np.array(sol))
+            third_end = time.time()
+            print('Third loop: ', third_end-third_start)
 
             x_s_arrays = np.stack(ans)
 
